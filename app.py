@@ -116,11 +116,6 @@ with left:
             "audio": False
         },
         async_processing=True,
-        rtc_configuration={
-            "iceServers": [
-                {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}
-            ]
-        }
     )
 with right:
     st.subheader("🎙️ Voice command")
