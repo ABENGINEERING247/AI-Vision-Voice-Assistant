@@ -8,10 +8,10 @@ import speech_recognition as sr
 from ultralytics import YOLO
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase
 
-st.set_page_config(page_title="AI Vision & Voice Assistant", page_icon="👁️", layout="wide")
+st.set_page_config(page_title="AI Real-Time Vision & Voice Assistant", page_icon="👁️", layout="wide")
 
-st.title("👁️ AI Vision & Voice Assistant")
-st.caption("Live real-time webcam object detection with YOLOv8 and browser voice announcements.")
+st.title("👁️ AI Real-Time Vision & Voice Assistant")
+st.caption("Live real-time webcam video object detection using YOLOv8 and browser voice announcements.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -33,7 +33,7 @@ with st.sidebar:
         "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
         "toothbrush"
     ]
-    st.info("Real-time video streaming mode active using YOLOv8.")
+    st.info("Real-time video streaming mode active using YOLOv8 and streamlit-webrtc.")
 
 @st.cache_resource
 def load_model(name):
@@ -86,6 +86,7 @@ class RealtimeVideoProcessor(VideoProcessorBase):
                 self.fps = 1.0 / max(now - self.last_frame_time, 0.001)
                 self.last_frame_time = now
         except Exception:
+            # Prevents background thread from crashing and closing the stream
             pass
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
@@ -94,7 +95,7 @@ left, right = st.columns([1.7, 1])
 
 with left:
     st.subheader("📷 Real-Time Live Webcam Stream")
-    st.write("Allow camera access when prompted. The video stream will remain active continuously.")
+    st.write("Allow browser camera access when prompted. Click 'Start' to begin live video detection.")
     
     ctx = webrtc_streamer(
         key="yolov8-realtime-stream",
@@ -154,6 +155,7 @@ if ctx and ctx.state.playing and ctx.video_processor:
 
 if announce_person and person_currently_visible:
     current_time = time.time()
+    # Throttle speech announcements to every 5 seconds to prevent overlapping audio
     if current_time - st.session_state.get("last_speech_time", 0) > 5.0:
         st.session_state["last_speech_time"] = current_time
         
