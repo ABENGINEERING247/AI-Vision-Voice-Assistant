@@ -105,9 +105,9 @@ with right:
         except Exception as exc:
             st.error(f"Could not process the audio: {exc}")
 
-# Dynamic Voice Announcement Trigger for Captured Image
-if camera_file is not None and announce_objects and current_labels_list := current_labels:
-    target_object = current_labels_list[0]
+# Dynamic Voice Announcement Trigger for Captured Image (Fixed Syntax)
+if camera_file is not None and announce_objects and current_labels:
+    target_object = current_labels[0]
     
     if st.session_state.get("last_announced_file") != camera_file:
         st.session_state["last_announced_file"] = camera_file
