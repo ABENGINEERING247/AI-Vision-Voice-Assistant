@@ -80,7 +80,6 @@ class RealtimeVideoProcessor(VideoProcessorBase):
                 self.fps = 1.0 / max(now - self.last_frame_time, 0.001)
                 self.last_frame_time = now
         except Exception:
-            # Prevents background thread from crashing
             pass
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
@@ -136,7 +135,6 @@ with right:
         except Exception as exc:
             st.error(f"Could not process the audio: {exc}")
 
-# Extract current labels from video processor state safely
 current_fps = 0.0
 current_labels_list = []
 
@@ -146,34 +144,31 @@ if ctx and ctx.state.playing and ctx.video_processor:
         current_fps = processor.fps
         current_labels_list = list(processor.latest_labels)
 
-# Dynamic Object Name Audio Announcement
 if announce_objects and current_labels_list:
-    # Pick the first detected object (or cycle through them)
     target_object = current_labels_list[0]
     current_time = time.time()
     
-    # Initialize speech timing dictionary in session state if not present
     if "last_spoken_times" not in st.session_state:
         st.session_state["last_spoken_times"] = {}
     
-    # Throttle speech for each unique object so it doesn't repeat too fast (e.g., every 4 seconds)
     last_spoken = st.session_state["last_spoken_times"].get(target_object, 0)
     if current_time - last_spoken > 4.0:
         st.session_state["last_spoken_times"][target_object] = current_time
         
-        # Inject JavaScript Web Speech API with dynamic object name
-        speech_script = f"""
-        <script>
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance("{target_object} detected");
-                utterance.rate = 1.0;
-                utterance.pitch = 1.0;
-                utterance.volume = 1.0;
-                window.speechSynthesis.speak(utterance);
-            }
-        </script>
-        """
+        # Safe string concatenation avoiding any f-string curly-brace syntax conflict
+        speech_script = (
+            "<script>\n"
+            "if ('speechSynthesis' in window) {\n"
+            "    window.speechSynthesis.cancel();\n"
+            "    const utterance = new SpeechSynthesisUtterance('" + target_object + " detected');\n"
+            "    utterance.rate = 1.0;\n"
+            "    utterance.pitch = 1.0;\n"
+            "    utterance.volume = 1.0;\n"
+            "    window.speechSynthesis.speak(utterance);\n"
+            "}\n"
+            "</script>"
+        )
+        
         st.components.v1.html(speech_script, height=0)
 
 st.divider()
