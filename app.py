@@ -8,14 +8,14 @@ import speech_recognition as sr
 from ultralytics import YOLO
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase
 
-st.set_page_config(page_title="AI Real-Time Vision & Voice Assistant", page_icon="👁️", layout="wide")
+st.set_page_config(page_title="AI Vision & Voice Assistant", page_icon="👁️", layout="wide")
 
-st.title("👁️ AI Real-Time Vision & Voice Assistant")
-st.caption("Live real-time webcam object detection with YOLO26 and browser voice announcements.")
+st.title("👁️ AI Vision & Voice Assistant")
+st.caption("Live real-time webcam object detection with YOLOv8 and browser voice announcements.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    model_name = st.selectbox("YOLO26 model", ["yolo26n.pt", "yolo26s.pt", "yolo26m.pt"], index=0)
+    model_name = st.selectbox("YOLOv8 model", ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"], index=0)
     confidence = st.slider("Detection confidence", 0.10, 0.95, 0.45, 0.05)
     announce_person = st.checkbox("Announce 'Person' via Speaker", value=True)
     
@@ -33,7 +33,7 @@ with st.sidebar:
         "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
         "toothbrush"
     ]
-    st.info("Real-time video streaming mode active. Ensure good lighting for best YOLO26 performance.")
+    st.info("Real-time video streaming mode active using YOLOv8.")
 
 @st.cache_resource
 def load_model(name):
@@ -86,7 +86,6 @@ class RealtimeVideoProcessor(VideoProcessorBase):
                 self.fps = 1.0 / max(now - self.last_frame_time, 0.001)
                 self.last_frame_time = now
         except Exception:
-            # Prevents background thread from crashing and closing the stream
             pass
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
@@ -98,7 +97,7 @@ with left:
     st.write("Allow camera access when prompted. The video stream will remain active continuously.")
     
     ctx = webrtc_streamer(
-        key="yolo26-realtime-stream",
+        key="yolov8-realtime-stream",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=RealtimeVideoProcessor,
         media_stream_constraints={
@@ -142,7 +141,6 @@ with right:
         except Exception as exc:
             st.error(f"Could not process the audio: {exc}")
 
-# Real-time Voice Announcement Trigger based on video state
 person_currently_visible = False
 current_fps = 0.0
 current_labels_list = []
@@ -156,7 +154,6 @@ if ctx and ctx.state.playing and ctx.video_processor:
 
 if announce_person and person_currently_visible:
     current_time = time.time()
-    # Throttle speech announcements to avoid overlapping speech every single frame (e.g. every 5 seconds)
     if current_time - st.session_state.get("last_speech_time", 0) > 5.0:
         st.session_state["last_speech_time"] = current_time
         
