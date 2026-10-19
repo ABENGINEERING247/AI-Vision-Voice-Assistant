@@ -36,7 +36,7 @@ with st.sidebar:
         "toothbrush"
     ]
     selected_objects = st.multiselect("Objects to announce", object_options, default=["person", "bottle", "cell phone"])
-    st.info("The nano model is the lightest option for most CPU laptops.")
+    st.info("The nano model is the lightest option for cloud performance.")
 
 @st.cache_resource
 def load_model(name):
@@ -107,10 +107,19 @@ with left:
         key="ai-vision-voice-camera",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VisionProcessor,
-        media_stream_constraints={"video": True, "audio": False},
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 640},
+                "height": {"ideal": 480},
+                "frameRate": {"ideal": 15}
+            }, 
+            "audio": False
+        },
         async_processing=True,
         rtc_configuration={
-            "iceServers": [{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}]
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}
+            ]
         }
     )
 with right:
