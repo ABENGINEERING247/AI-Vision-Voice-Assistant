@@ -9,14 +9,14 @@ import speech_recognition as sr
 from ultralytics import YOLO
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase
 
-st.set_page_config(page_title="YOLO26 Vision & Voice", page_icon="👁️", layout="wide")
+st.set_page_config(page_title="AI Vision & Voice Assistant", page_icon="👁️", layout="wide")
 
-st.title("👁️ YOLO26 Real-Time Vision & Voice Assistant")
+st.title("👁️ AI Vision & Voice Assistant")
 st.caption("Live webcam object detection with spoken labels and microphone voice commands.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    model_name = st.selectbox("YOLO26 model", ["yolo26n.pt", "yolo26s.pt", "yolo26m.pt"], index=0)
+    model_name = st.selectbox("YOLO model", ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"], index=0)
     confidence = st.slider("Detection confidence", 0.10, 0.95, 0.45, 0.05)
     announce = st.checkbox("Announce detected objects", value=True)
     announce_interval = st.slider("Repeat announcement after (seconds)", 2, 20, 5)
@@ -104,11 +104,14 @@ with left:
     st.subheader("📷 Live webcam")
     st.write("Allow camera access when your browser asks. For best performance, start with the nano model.")
     ctx = webrtc_streamer(
-        key="yolo26-live-camera",
+        key="ai-vision-voice-camera",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=VisionProcessor,
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
+        rtc_configuration={
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}]
+        }
     )
 with right:
     st.subheader("🎙️ Voice command")
