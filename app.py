@@ -36,7 +36,7 @@ with st.sidebar:
         "toothbrush"
     ]
     selected_objects = st.multiselect("Objects to announce", object_options, default=["person", "bottle", "cell phone"])
-    st.info("The nano model is the lightest option for local performance.")
+    st.info("The nano model is the lightest option for best performance.")
 
 @st.cache_resource
 def load_model(name):
@@ -45,7 +45,7 @@ def load_model(name):
 try:
     model = load_model(model_name)
 except Exception as exc:
-    st.error(f"Could not load {model_name}. Check your internet connection and installed Ultralytics version.\n\nDetails: {exc}")
+    st.error(f"Could not load {model_name}. Check your internet connection.\n\nDetails: {exc}")
     st.stop()
 
 class VisionProcessor(VideoProcessorBase):
@@ -67,32 +67,37 @@ class VisionProcessor(VideoProcessorBase):
     def recv(self, frame):
         image = frame.to_ndarray(format="bgr24")
         now = time.time()
-        results = self.model.predict(image, conf=self.confidence, verbose=False, imgsz=640)
-        result = results[0]
-        labels = []
-        if result.boxes is not None:
-            for box in result.boxes:
-                cls_id = int(box.cls[0].item())
-                label = self.model.names.get(cls_id, str(cls_id))
-                score = float(box.conf[0].item())
-                labels.append(label)
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                cv2.rectangle(image, (x1, y1), (x2, y2), (40, 220, 80), 2)
-                cv2.putText(image, f"{label} {score:.0%}", (x1, max(24, y1 - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (40, 220, 80), 2)
+        
+        try:
+            results = self.model.predict(image, conf=self.confidence, verbose=False, imgsz=640)
+            result = results[0]
+            labels = []
+            if result.boxes is not None:
+                for box in result.boxes:
+                    cls_id = int(box.cls[0].item())
+                    label = self.model.names.get(cls_id, str(cls_id))
+                    score = float(box.conf[0].item())
+                    labels.append(label)
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    cv2.rectangle(image, (x1, y1), (x2, y2), (40, 220, 80), 2)
+                    cv2.putText(image, f"{label} {score:.0%}", (x1, max(24, y1 - 8)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (40, 220, 80), 2)
 
-        with self.lock:
-            self.latest_labels = labels
-            self.counts.update(labels)
-            self.fps = 1.0 / max(now - self.last_frame_time, 0.001)
-            self.last_frame_time = now
-            if self.announce_enabled:
-                for label in sorted(set(labels)):
-                    if self.only_selected and label not in self.selected:
-                        continue
-                    if now - self.last_spoken.get(label, 0) >= self.interval:
-                        self.events.appendleft((time.strftime("%H:%M:%S"), label))
-                        self.last_spoken[label] = now
+            with self.lock:
+                self.latest_labels = labels
+                self.counts.update(labels)
+                self.fps = 1.0 / max(now - self.last_frame_time, 0.001)
+                self.last_frame_time = now
+                if self.announce_enabled:
+                    for label in sorted(set(labels)):
+                        if self.only_selected and label not in self.selected:
+                            continue
+                        if now - self.last_spoken.get(label, 0) >= self.interval:
+                            self.events.appendleft((time.strftime("%H:%M:%S"), label))
+                            self.last_spoken[label] = now
+        except Exception:
+            # Fallback to prevent thread crash if any frame error occurs
+            pass
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
 
@@ -111,7 +116,7 @@ with left:
             "video": {
                 "width": {"ideal": 640},
                 "height": {"ideal": 480},
-                "frameRate": {"ideal": 15}
+                "frameRate": {"ideal": 20}
             }, 
             "audio": False
         },
@@ -180,11 +185,6 @@ else:
 st.subheader("🔊 Spoken object names")
 st.warning(
     "Browser-based Streamlit apps cannot reliably play audio from the server's Python process through the user's speakers. "
-    "This starter app logs announcement events; the optional local TTS module below can speak on the computer running Streamlit. "
-    "For a deployed cloud app, use browser-side speech synthesis for audible announcements."
+    "This starter app logs announcement events; the optional local TTS module below can speak on the computer running Streamlit."
 )
-st.markdown(
-    "To enable local computer speech, install `pyttsx3` and add a local speech worker that consumes the processor's event queue. "
-    "The microphone recognizer uses Google's online speech recognition service, so audio is sent to that service for transcription."
-)
-st.caption("Privacy: video processing runs in the app session. Do not use this demo for covert monitoring; obtain consent before recording or monitoring people.")
+st.caption("Privacy: video processing runs in the app session. Obtain consent before monitoring people.")
