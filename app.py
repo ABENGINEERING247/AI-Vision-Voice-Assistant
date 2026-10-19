@@ -88,10 +88,11 @@ left, right = st.columns([1.7, 1])
 
 with left:
     st.subheader("📷 Real-Time Live Webcam Stream")
-    st.write("Allow browser camera access and click 'Start' to begin live video detection.")
+    st.write("Camera will initialize automatically upon clicking Start.")
     
+    # Using parameters to make it open immediately upon interaction
     ctx = webrtc_streamer(
-        key="yolov8-realtime-dynamic-audio",
+        key="yolov8-realtime-autostart",
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=RealtimeVideoProcessor,
         media_stream_constraints={
@@ -103,6 +104,7 @@ with left:
             "audio": False
         },
         async_processing=True,
+        rtc_configuration={"iceServers": []}
     )
 
 with right:
@@ -155,7 +157,6 @@ if announce_objects and current_labels_list:
     if current_time - last_spoken > 4.0:
         st.session_state["last_spoken_times"][target_object] = current_time
         
-        # Safe string concatenation avoiding any f-string curly-brace syntax conflict
         speech_script = (
             "<script>\n"
             "if ('speechSynthesis' in window) {\n"
@@ -168,7 +169,6 @@ if announce_objects and current_labels_list:
             "}\n"
             "</script>"
         )
-        
         st.components.v1.html(speech_script, height=0)
 
 st.divider()
@@ -182,6 +182,6 @@ if ctx and ctx.state.playing:
     
     st.write("**Currently visible:** " + (", ".join(sorted(set(current_labels_list))) if current_labels_list else "Scanning for objects..."))
 else:
-    st.info("Start the webcam stream above to view real-time object detection and audio announcements.")
+    st.info("Click 'Start' on the webcam stream above to begin live detection.")
 
 st.caption("Privacy: real-time video processing runs securely in your active browser session.")
