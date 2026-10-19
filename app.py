@@ -9,15 +9,13 @@ from ultralytics import YOLO
 st.set_page_config(page_title="AI Vision & Voice Assistant", page_icon="👁️", layout="wide")
 
 st.title("👁️ AI Vision & Voice Assistant")
-st.caption("Live webcam object detection with spoken labels and microphone voice commands.")
+st.caption("Live webcam object detection with browser voice announcements and microphone voice commands.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
     model_name = st.selectbox("YOLO model", ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"], index=0)
     confidence = st.slider("Detection confidence", 0.10, 0.95, 0.45, 0.05)
-    announce = st.checkbox("Announce detected objects", value=True)
-    announce_interval = st.slider("Repeat announcement after (seconds)", 2, 20, 5)
-    only_selected = st.checkbox("Announce selected objects only", value=False)
+    announce_person = st.checkbox("Announce 'Person' via Browser Voice", value=True)
     
     object_options = [
         "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
@@ -33,30 +31,27 @@ with st.sidebar:
         "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
         "toothbrush"
     ]
-    selected_objects = st.multiselect("Objects to announce", object_options, default=["person", "bottle", "cell phone"])
     st.info("Using native browser camera capture for 100% stability.")
 
 @st.cache_resource
-def load_model(name):
+def model_load(name):
     return YOLO(name)
 
 try:
-    model = load_model(model_name)
+    model = model_load(model_name)
 except Exception as exc:
     st.error(f"Could not load {model_name}. Check your internet connection.\n\nDetails: {exc}")
     st.stop()
 
 left, right = st.columns([1.7, 1])
 
+current_labels = []
+
 with left:
     st.subheader("📷 Live Camera / Snapshot")
-    st.write("Click 'Take Photo' or use continuous frame capture below.")
+    st.write("Take a snapshot using your camera below to run detection and trigger voice alerts.")
     
-    # Using st.camera_input which never crashes due to WebRTC/STUN issues
     camera_file = st.camera_input("Take a picture for detection")
-    
-    current_labels = []
-    annotated_image = None
     
     if camera_file is not None:
         # Convert image to OpenCV format
@@ -112,6 +107,23 @@ with right:
         except Exception as exc:
             st.error(f"Could not process the audio: {exc}")
 
+# Browser-side Voice Announcement Trigger
+if camera_file is not None and announce_person and "person" in current_labels:
+    # Ensure it only triggers once per snapshot upload using session state tracking
+    if st.session_state.get("last_announced_file") != camera_file:
+        st.session_state["last_announced_file"] = camera_file
+        
+        # Inject JavaScript Web Speech API for browser voice output
+        speech_script = """
+        <script>
+            const utterance = new SpeechSynthesisUtterance("Person detected!");
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            window.speechSynthesis.speak(utterance);
+        </script>
+        """
+        st.components.v1.html(speech_script, height=0)
+
 st.divider()
 st.subheader("📊 Monitoring dashboard")
 
@@ -119,10 +131,10 @@ if camera_file is not None:
     c1, c2, c3 = st.columns(3)
     c1.metric("Objects in frame", len(current_labels))
     c2.metric("Unique labels", len(set(current_labels)))
-    c3.metric("Status", "Processed Successfully")
+    c3.metric("Status", "Processed & Announced" if "person" in current_labels else "Processed")
     
     st.write("**Currently visible:** " + (", ".join(sorted(set(current_labels))) if current_labels else "No objects detected"))
 else:
-    st.info("Take a picture using the camera above to view detections and stats.")
+    st.info("Take a picture using the camera above to view detections and audio alerts.")
 
-st.caption("Privacy: processing runs securely in your session.")
+st.caption("Privacy: processing runs securely in your browser session.")
