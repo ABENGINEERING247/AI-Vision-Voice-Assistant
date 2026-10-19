@@ -36,7 +36,7 @@ with st.sidebar:
         "toothbrush"
     ]
     selected_objects = st.multiselect("Objects to announce", object_options, default=["person", "bottle", "cell phone"])
-    st.info("The nano model is the lightest option for cloud performance.")
+    st.info("The nano model is the lightest option for local performance.")
 
 @st.cache_resource
 def load_model(name):
@@ -102,7 +102,7 @@ def get_processor(ctx):
 left, right = st.columns([1.7, 1])
 with left:
     st.subheader("📷 Live webcam")
-    st.write("Allow camera access when your browser asks. For best performance, start with the nano model.")
+    st.write("Allow browser camera access when prompted.")
     ctx = webrtc_streamer(
         key="ai-vision-voice-camera",
         mode=WebRtcMode.SENDRECV,
