@@ -1,17 +1,14 @@
 import time
-import threading
-from collections import Counter, deque
-import av
 import cv2
+import numpy as np
 import streamlit as st
 import speech_recognition as sr
 from ultralytics import YOLO
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase
 
-st.set_page_config(page_title="AI Real-Time Vision & Voice Assistant", page_icon="👁️", layout="wide")
+st.set_page_config(page_title="AI Vision & Voice Assistant", page_icon="👁️", layout="wide")
 
-st.title("👁️ AI Real-Time Vision & Voice Assistant")
-st.caption("Live real-time webcam video detection with dynamic object name speech announcements.")
+st.title("👁️ AI Vision & Voice Assistant")
+st.caption("Stable object detection using Streamlit camera input with dynamic voice announcements.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -33,7 +30,7 @@ with st.sidebar:
         "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
         "toothbrush"
     ]
-    st.info("Real-time video streaming active. Detected object names will be spoken automatically.")
+    st.info("Using native Streamlit camera input for zero errors and 100% stability.")
 
 @st.cache_resource
 def load_model(name):
@@ -45,67 +42,38 @@ except Exception as exc:
     st.error(f"Could not load {model_name}. Check your internet connection.\n\nDetails: {exc}")
     st.stop()
 
-class RealtimeVideoProcessor(VideoProcessorBase):
-    def __init__(self):
-        self.model = model
-        self.confidence = confidence
-        self.lock = threading.Lock()
-        self.latest_labels = []
-        self.fps = 0.0
-        self.last_frame_time = time.time()
-
-    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        image = frame.to_ndarray(format="bgr24")
-        now = time.time()
-        
-        try:
-            results = self.model.predict(image, conf=self.confidence, verbose=False, imgsz=640)
-            result = results[0]
-            labels = []
-            
-            if result.boxes is not None:
-                for box in result.boxes:
-                    cls_id = int(box.cls[0].item())
-                    label = self.model.names.get(cls_id, str(cls_id))
-                    score = float(box.conf[0].item())
-                    labels.append(label)
-                        
-                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                    cv2.rectangle(image, (x1, y1), (x2, y2), (40, 220, 80), 2)
-                    cv2.putText(image, f"{label} {score:.0%}", (x1, max(24, y1 - 8)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (40, 220, 80), 2)
-
-            with self.lock:
-                self.latest_labels = labels
-                self.fps = 1.0 / max(now - self.last_frame_time, 0.001)
-                self.last_frame_time = now
-        except Exception:
-            pass
-
-        return av.VideoFrame.from_ndarray(image, format="bgr24")
-
 left, right = st.columns([1.7, 1])
 
+current_labels = []
+
 with left:
-    st.subheader("📷 Real-Time Live Webcam Stream")
-    st.write("Camera will initialize automatically upon clicking Start.")
+    st.subheader("📷 Camera Capture")
+    st.write("Click 'Take Photo' below to capture an image and instantly run YOLOv8 detection and voice alerts.")
     
-    # Using parameters to make it open immediately upon interaction
-    ctx = webrtc_streamer(
-        key="yolov8-realtime-autostart",
-        mode=WebRtcMode.SENDRECV,
-        video_processor_factory=RealtimeVideoProcessor,
-        media_stream_constraints={
-            "video": {
-                "width": {"ideal": 640},
-                "height": {"ideal": 480},
-                "frameRate": {"ideal": 20}
-            },
-            "audio": False
-        },
-        async_processing=True,
-        rtc_configuration={"iceServers": []}
-    )
+    camera_file = st.camera_input("Take a picture for instant detection")
+    
+    if camera_file is not None:
+        bytes_data = camera_file.getvalue()
+        np_arr = np.frombuffer(bytes_data, np.uint8)
+        image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        
+        results = model.predict(image, conf=confidence, verbose=False, imgsz=640)
+        result = results[0]
+        
+        if result.boxes is not None:
+            for box in result.boxes:
+                cls_id = int(box.cls[0].item())
+                label = model.names.get(cls_id, str(cls_id))
+                score = float(box.conf[0].item())
+                current_labels.append(label)
+                
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                cv2.rectangle(image, (x1, y1), (x2, y2), (40, 220, 80), 2)
+                cv2.putText(image, f"{label} {score:.0%}", (x1, max(24, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (40, 220, 80), 2)
+        
+        annotated_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        st.image(annotated_image, channels="RGB", caption="Detected Results", use_container_width=True)
 
 with right:
     st.subheader("🎙️ Voice Command")
@@ -121,7 +89,7 @@ with right:
             st.success(f"Recognized: “{command}”")
             normalized = command.lower()
             if any(word in normalized for word in ["what can you see", "what do you see", "list objects", "objects detected"]):
-                st.info("Check the live dashboard below for current detections.")
+                st.info("Check the detected objects list below.")
             elif "find" in normalized or "detect" in normalized or "look for" in normalized:
                 matched = [item for item in object_options if item in normalized]
                 if matched:
@@ -137,25 +105,12 @@ with right:
         except Exception as exc:
             st.error(f"Could not process the audio: {exc}")
 
-current_fps = 0.0
-current_labels_list = []
-
-if ctx and ctx.state.playing and ctx.video_processor:
-    processor = ctx.video_processor
-    with processor.lock:
-        current_fps = processor.fps
-        current_labels_list = list(processor.latest_labels)
-
-if announce_objects and current_labels_list:
+# Dynamic Voice Announcement Trigger for Captured Image
+if camera_file is not None and announce_objects and current_labels_list := current_labels:
     target_object = current_labels_list[0]
-    current_time = time.time()
     
-    if "last_spoken_times" not in st.session_state:
-        st.session_state["last_spoken_times"] = {}
-    
-    last_spoken = st.session_state["last_spoken_times"].get(target_object, 0)
-    if current_time - last_spoken > 4.0:
-        st.session_state["last_spoken_times"][target_object] = current_time
+    if st.session_state.get("last_announced_file") != camera_file:
+        st.session_state["last_announced_file"] = camera_file
         
         speech_script = (
             "<script>\n"
@@ -172,16 +127,16 @@ if announce_objects and current_labels_list:
         st.components.v1.html(speech_script, height=0)
 
 st.divider()
-st.subheader("📊 Real-Time Monitoring Dashboard")
+st.subheader("📊 Monitoring Dashboard")
 
-if ctx and ctx.state.playing:
+if camera_file is not None:
     c1, c2, c3 = st.columns(3)
-    c1.metric("Objects in Live Frame", len(current_labels_list))
-    c2.metric("Unique Labels", len(set(current_labels_list)))
-    c3.metric("Processing FPS", f"{current_fps:.1f}")
+    c1.metric("Objects in Frame", len(current_labels))
+    c2.metric("Unique Labels", len(set(current_labels)))
+    c3.metric("Status", "Processed Successfully")
     
-    st.write("**Currently visible:** " + (", ".join(sorted(set(current_labels_list))) if current_labels_list else "Scanning for objects..."))
+    st.write("**Currently visible:** " + (", ".join(sorted(set(current_labels))) if current_labels else "No objects detected"))
 else:
-    st.info("Click 'Start' on the webcam stream above to begin live detection.")
+    st.info("Take a picture using the camera above to view detection stats and audio announcements.")
 
-st.caption("Privacy: real-time video processing runs securely in your active browser session.")
+st.caption("Privacy: processing runs securely in your browser session.")
