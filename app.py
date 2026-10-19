@@ -9,13 +9,13 @@ from ultralytics import YOLO
 st.set_page_config(page_title="AI Vision & Voice Assistant", page_icon="👁️", layout="wide")
 
 st.title("👁️ AI Vision & Voice Assistant")
-st.caption("Live webcam object detection with browser voice announcements and microphone voice commands.")
+st.caption("Live webcam object detection with system/mobile voice announcements and voice commands.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
     model_name = st.selectbox("YOLO model", ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"], index=0)
     confidence = st.slider("Detection confidence", 0.10, 0.95, 0.45, 0.05)
-    announce_person = st.checkbox("Announce 'Person' via Browser Voice", value=True)
+    announce_person = st.checkbox("Announce 'Person' via System/Mobile Speaker", value=True)
     
     object_options = [
         "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
@@ -31,7 +31,7 @@ with st.sidebar:
         "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
         "toothbrush"
     ]
-    st.info("Using native browser camera capture for 100% stability.")
+    st.info("Using native camera capture for high stability on mobile and desktop.")
 
 @st.cache_resource
 def model_load(name):
@@ -49,17 +49,15 @@ current_labels = []
 
 with left:
     st.subheader("📷 Live Camera / Snapshot")
-    st.write("Take a snapshot using your camera below to run detection and trigger voice alerts.")
+    st.write("Take a snapshot using your camera below to run detection and trigger mobile/system speaker audio.")
     
     camera_file = st.camera_input("Take a picture for detection")
     
     if camera_file is not None:
-        # Convert image to OpenCV format
         bytes_data = camera_file.getvalue()
         np_arr = np.frombuffer(bytes_data, np.uint8)
         image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         
-        # Run YOLO prediction
         results = model.predict(image, conf=confidence, verbose=False, imgsz=640)
         result = results[0]
         
@@ -107,19 +105,23 @@ with right:
         except Exception as exc:
             st.error(f"Could not process the audio: {exc}")
 
-# Browser-side Voice Announcement Trigger
 if camera_file is not None and announce_person and "person" in current_labels:
-    # Ensure it only triggers once per snapshot upload using session state tracking
     if st.session_state.get("last_announced_file") != camera_file:
         st.session_state["last_announced_file"] = camera_file
         
-        # Inject JavaScript Web Speech API for browser voice output
         speech_script = """
         <script>
-            const utterance = new SpeechSynthesisUtterance("Person detected!");
-            utterance.rate = 1.0;
-            utterance.pitch = 1.0;
-            window.speechSynthesis.speak(utterance);
+            function speakText() {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance("Person detected!");
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.0;
+                    utterance.volume = 1.0;
+                    window.speechSynthesis.speak(utterance);
+                }
+            }
+            setTimeout(speakText, 200);
         </script>
         """
         st.components.v1.html(speech_script, height=0)
