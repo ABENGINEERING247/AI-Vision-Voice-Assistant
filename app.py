@@ -1,21 +1,23 @@
 import time
+import threading
 from collections import Counter, deque
+import av
 import cv2
-import numpy as np
 import streamlit as st
 import speech_recognition as sr
 from ultralytics import YOLO
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase
 
-st.set_page_config(page_title="AI Vision & Voice Assistant", page_icon="👁️", layout="wide")
+st.set_page_config(page_title="AI Real-Time Vision & Voice Assistant", page_icon="👁️", layout="wide")
 
-st.title("👁️ AI Vision & Voice Assistant")
-st.caption("Live webcam object detection with system/mobile voice announcements and voice commands.")
+st.title("👁️ AI Real-Time Vision & Voice Assistant")
+st.caption("Live real-time webcam object detection with YOLO26 and browser voice announcements.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    model_name = st.selectbox("YOLO model", ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"], index=0)
+    model_name = st.selectbox("YOLO26 model", ["yolo26n.pt", "yolo26s.pt", "yolo26m.pt"], index=0)
     confidence = st.slider("Detection confidence", 0.10, 0.95, 0.45, 0.05)
-    announce_person = st.checkbox("Announce 'Person' via System/Mobile Speaker", value=True)
+    announce_person = st.checkbox("Announce 'Person' via Speaker", value=True)
     
     object_options = [
         "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
@@ -31,52 +33,87 @@ with st.sidebar:
         "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
         "toothbrush"
     ]
-    st.info("Using native camera capture for high stability on mobile and desktop.")
+    st.info("Real-time video streaming mode active. Ensure good lighting for best YOLO26 performance.")
 
 @st.cache_resource
-def model_load(name):
+def load_model(name):
     return YOLO(name)
 
 try:
-    model = model_load(model_name)
+    model = load_model(model_name)
 except Exception as exc:
-    st.error(f"Could not load {model_name}. Check your internet connection.\n\nDetails: {exc}")
+    st.error(f"Could not load {model_name}. Check your internet connection or model availability.\n\nDetails: {exc}")
     st.stop()
+
+class RealtimeVideoProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.model = model
+        self.confidence = confidence
+        self.lock = threading.Lock()
+        self.latest_labels = []
+        self.person_detected_flag = False
+        self.fps = 0.0
+        self.last_frame_time = time.time()
+
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        image = frame.to_ndarray(format="bgr24")
+        now = time.time()
+        
+        try:
+            results = self.model.predict(image, conf=self.confidence, verbose=False, imgsz=640)
+            result = results[0]
+            labels = []
+            has_person = False
+            
+            if result.boxes is not None:
+                for box in result.boxes:
+                    cls_id = int(box.cls[0].item())
+                    label = self.model.names.get(cls_id, str(cls_id))
+                    score = float(box.conf[0].item())
+                    labels.append(label)
+                    
+                    if label == "person":
+                        has_person = True
+                        
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    cv2.rectangle(image, (x1, y1), (x2, y2), (40, 220, 80), 2)
+                    cv2.putText(image, f"{label} {score:.0%}", (x1, max(24, y1 - 8)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (40, 220, 80), 2)
+
+            with self.lock:
+                self.latest_labels = labels
+                self.person_detected_flag = has_person
+                self.fps = 1.0 / max(now - self.last_frame_time, 0.001)
+                self.last_frame_time = now
+        except Exception:
+            # Prevents background thread from crashing and closing the stream
+            pass
+
+        return av.VideoFrame.from_ndarray(image, format="bgr24")
 
 left, right = st.columns([1.7, 1])
 
-current_labels = []
-
 with left:
-    st.subheader("📷 Live Camera / Snapshot")
-    st.write("Take a snapshot using your camera below to run detection and trigger mobile/system speaker audio.")
+    st.subheader("📷 Real-Time Live Webcam Stream")
+    st.write("Allow camera access when prompted. The video stream will remain active continuously.")
     
-    camera_file = st.camera_input("Take a picture for detection")
-    
-    if camera_file is not None:
-        bytes_data = camera_file.getvalue()
-        np_arr = np.frombuffer(bytes_data, np.uint8)
-        image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        
-        results = model.predict(image, conf=confidence, verbose=False, imgsz=640)
-        result = results[0]
-        
-        if result.boxes is not None:
-            for box in result.boxes:
-                cls_id = int(box.cls[0].item())
-                label = model.names.get(cls_id, str(cls_id))
-                score = float(box.conf[0].item())
-                current_labels.append(label)
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                cv2.rectangle(image, (x1, y1), (x2, y2), (40, 220, 80), 2)
-                cv2.putText(image, f"{label} {score:.0%}", (x1, max(24, y1 - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (40, 220, 80), 2)
-        
-        annotated_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        st.image(annotated_image, channels="RGB", caption="Detected Frame Results", use_container_width=True)
+    ctx = webrtc_streamer(
+        key="yolo26-realtime-stream",
+        mode=WebRtcMode.SENDRECV,
+        video_processor_factory=RealtimeVideoProcessor,
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 640},
+                "height": {"ideal": 480},
+                "frameRate": {"ideal": 20}
+            },
+            "audio": False
+        },
+        async_processing=True,
+    )
 
 with right:
-    st.subheader("🎙️ Voice command")
+    st.subheader("🎙️ Voice Command")
     st.write("Record a short command, for example: “find a bottle” or “what can you see?”")
     audio = st.audio_input("Record voice command")
     if audio is not None:
@@ -89,7 +126,7 @@ with right:
             st.success(f"Recognized: “{command}”")
             normalized = command.lower()
             if any(word in normalized for word in ["what can you see", "what do you see", "list objects", "objects detected"]):
-                st.info("Check the detected objects list below.")
+                st.info("Check the live dashboard below for current detections.")
             elif "find" in normalized or "detect" in normalized or "look for" in normalized:
                 matched = [item for item in object_options if item in normalized]
                 if matched:
@@ -105,38 +142,49 @@ with right:
         except Exception as exc:
             st.error(f"Could not process the audio: {exc}")
 
-if camera_file is not None and announce_person and "person" in current_labels:
-    if st.session_state.get("last_announced_file") != camera_file:
-        st.session_state["last_announced_file"] = camera_file
+# Real-time Voice Announcement Trigger based on video state
+person_currently_visible = False
+current_fps = 0.0
+current_labels_list = []
+
+if ctx and ctx.state.playing and ctx.video_processor:
+    processor = ctx.video_processor
+    with processor.lock:
+        person_currently_visible = processor.person_detected_flag
+        current_fps = processor.fps
+        current_labels_list = list(processor.latest_labels)
+
+if announce_person and person_currently_visible:
+    current_time = time.time()
+    # Throttle speech announcements to avoid overlapping speech every single frame (e.g. every 5 seconds)
+    if current_time - st.session_state.get("last_speech_time", 0) > 5.0:
+        st.session_state["last_speech_time"] = current_time
         
         speech_script = """
         <script>
-            function speakText() {
-                if ('speechSynthesis' in window) {
-                    window.speechSynthesis.cancel();
-                    const utterance = new SpeechSynthesisUtterance("Person detected!");
-                    utterance.rate = 1.0;
-                    utterance.pitch = 1.0;
-                    utterance.volume = 1.0;
-                    window.speechSynthesis.speak(utterance);
-                }
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance("Person detected!");
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+                window.speechSynthesis.speak(utterance);
             }
-            setTimeout(speakText, 200);
         </script>
         """
         st.components.v1.html(speech_script, height=0)
 
 st.divider()
-st.subheader("📊 Monitoring dashboard")
+st.subheader("📊 Real-Time Monitoring Dashboard")
 
-if camera_file is not None:
+if ctx and ctx.state.playing:
     c1, c2, c3 = st.columns(3)
-    c1.metric("Objects in frame", len(current_labels))
-    c2.metric("Unique labels", len(set(current_labels)))
-    c3.metric("Status", "Processed & Announced" if "person" in current_labels else "Processed")
+    c1.metric("Objects in Live Frame", len(current_labels_list))
+    c2.metric("Unique Labels", len(set(current_labels_list)))
+    c3.metric("Processing FPS", f"{current_fps:.1f}")
     
-    st.write("**Currently visible:** " + (", ".join(sorted(set(current_labels))) if current_labels else "No objects detected"))
+    st.write("**Currently visible:** " + (", ".join(sorted(set(current_labels_list))) if current_labels_list else "Scanning for objects..."))
 else:
-    st.info("Take a picture using the camera above to view detections and audio alerts.")
+    st.info("Start the webcam stream above to view real-time object detection statistics and live stats.")
 
-st.caption("Privacy: processing runs securely in your browser session.")
+st.caption("Privacy: video processing runs securely in your active session.")
