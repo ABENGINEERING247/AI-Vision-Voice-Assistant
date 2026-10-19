@@ -1,14 +1,16 @@
 import time
+import threading
+import av
 import cv2
-import numpy as np
 import streamlit as st
 import speech_recognition as sr
 from ultralytics import YOLO
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase
 
 st.set_page_config(page_title="AI Real-Time Vision & Voice Assistant", page_icon="👁️", layout="wide")
 
 st.title("👁️ AI Real-Time Vision & Voice Assistant")
-st.caption("Real-time live video detection with dynamic voice announcements (No snapshots required).")
+st.caption("Live real-time webcam video object detection with YOLOv8 and dynamic speech announcements.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -30,7 +32,7 @@ with st.sidebar:
         "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
         "toothbrush"
     ]
-    st.info("Real-time streaming mode active.")
+    st.info("Real-time video streaming mode active with YOLOv8 backend processing.")
 
 @st.cache_resource
 def load_model(name):
@@ -42,39 +44,62 @@ except Exception as exc:
     st.error(f"Could not load {model_name}. Check your internet connection.\n\nDetails: {exc}")
     st.stop()
 
-# HTML5 + JavaScript WebRTC client-side video streaming component for true real-time feed without streamlit-webrtc crashes
-realtime_html = """
-<div style="display: flex; flex-direction: column; align-items: center;">
-    <video id="webcam" autoplay playsinline width="640" height="480" style="border-radius: 10px; border: 2px solid #4CAF50;"></video>
-    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
-    <p id="status" style="margin-top: 10px; font-weight: bold; color: #555;">Initializing live camera...</p>
-</div>
+class RealtimeVideoProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.model = model
+        self.confidence = confidence
+        self.lock = threading.Lock()
+        self.latest_labels = []
+        self.fps = 0.0
+        self.last_frame_time = time.time()
 
-<script>
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('canvas');
-    const statusText = document.getElementById('status');
-    const context = canvas.getContext('2d');
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        image = frame.to_ndarray(format="bgr24")
+        now = time.time()
+        
+        try:
+            results = self.model.predict(image, conf=self.confidence, verbose=False, imgsz=640)
+            result = results[0]
+            labels = []
+            
+            if result.boxes is not None:
+                for box in result.boxes:
+                    cls_id = int(box.cls[0].item())
+                    label = self.model.names.get(cls_id, str(cls_id))
+                    score = float(box.conf[0].item())
+                    labels.append(label)
+                        
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    cv2.rectangle(image, (x1, y1), (x2, y2), (40, 220, 80), 2)
+                    cv2.putText(image, f"{label} {score:.0%}", (x1, max(24, y1 - 8)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (40, 220, 80), 2)
 
-    navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false })
-        .then(stream => {
-            video.srcObject = stream;
-            statusText.innerText = "Live camera streaming active.";
-        })
-        .catch(err => {
-            statusText.innerText = "Camera access denied or unavailable: " + err;
-        });
-</script>
-"""
+            with self.lock:
+                self.latest_labels = labels
+                self.fps = 1.0 / max(now - self.last_frame_time, 0.001)
+                self.last_frame_time = now
+        except Exception:
+            pass
+
+        return av.VideoFrame.from_ndarray(image, format="bgr24")
 
 left, right = st.columns([1.7, 1])
 
 with left:
     st.subheader("📷 Real-Time Live Webcam Stream")
-    st.write("Camera streams live continuously. (Note: For full server-side frame processing without WebRTC library errors, use browser stream below or standard component).")
+    st.write("Click **Start** below to activate live camera feed and YOLOv8 detection.")
     
-    # Render the stable HTML5 real-time video element
-    st.components.v1.html(realtime_html, height=550)
+    ctx = webrtc_streamer(
+        key="yolov8-realtime-live",
+        mode=WebRtcMode.SENDRECV,
+        video_processor_factory=RealtimeVideoProcessor,
+        media_stream_constraints={
+            "video": {"width": {"ideal": 640}, "height": {"ideal": 480}, "frameRate": {"ideal": 20}},
+            "audio": False
+        },
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        async_processing=True,
+    )
 
 with right:
     st.subheader("🎙️ Voice Command")
@@ -90,7 +115,7 @@ with right:
             st.success(f"Recognized: “{command}”")
             normalized = command.lower()
             if any(word in normalized for word in ["what can you see", "what do you see", "list objects", "objects detected"]):
-                st.info("Check the system status.")
+                st.info("Check live dashboard below.")
             elif "find" in normalized or "detect" in normalized or "look for" in normalized:
                 matched = [item for item in object_options if item in normalized]
                 if matched:
@@ -106,8 +131,53 @@ with right:
         except Exception as exc:
             st.error(f"Could not process the audio: {exc}")
 
-st.divider()
-st.subheader("📊 Monitoring Dashboard")
-st.info("Real-time viewer active. Camera starts instantly without requiring manual snapshots.")
+# Extract current labels from video processor state safely
+current_fps = 0.0
+current_labels_list = []
 
-st.caption("Privacy: processing runs securely in your browser session.")
+if ctx and ctx.state.playing and ctx.video_processor:
+    processor = ctx.video_processor
+    with processor.lock:
+        current_fps = processor.fps
+        current_labels_list = list(processor.latest_labels)
+
+# Dynamic Object Name Audio Announcement
+if announce_objects and current_labels_list:
+    target_object = current_labels_list[0]
+    current_time = time.time()
+    
+    if "last_spoken_times" not in st.session_state:
+        st.session_state["last_spoken_times"] = {}
+    
+    last_spoken = st.session_state["last_spoken_times"].get(target_object, 0)
+    if current_time - last_spoken > 4.0:
+        st.session_state["last_spoken_times"][target_object] = current_time
+        
+        speech_script = (
+            "<script>\n"
+            "if ('speechSynthesis' in window) {\n"
+            "    window.speechSynthesis.cancel();\n"
+            "    const utterance = new SpeechSynthesisUtterance('" + target_object + " detected');\n"
+            "    utterance.rate = 1.0;\n"
+            "    utterance.pitch = 1.0;\n"
+            "    utterance.volume = 1.0;\n"
+            "    window.speechSynthesis.speak(utterance);\n"
+            "}\n"
+            "</script>"
+        )
+        st.components.v1.html(speech_script, height=0)
+
+st.divider()
+st.subheader("📊 Real-Time Monitoring Dashboard")
+
+if ctx and ctx.state.playing:
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Objects in Live Frame", len(current_labels_list))
+    c2.metric("Unique Labels", len(set(current_labels_list)))
+    c3.metric("Processing FPS", f"{current_fps:.1f}")
+    
+    st.write("**Currently visible:** " + (", ".join(sorted(set(current_labels_list))) if current_labels_list else "Scanning for objects..."))
+else:
+    st.info("Click **Start** on the webcam stream above to begin live detection.")
+
+st.caption("Privacy: real-time video processing runs securely in your active browser session.")
